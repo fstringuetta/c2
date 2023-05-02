@@ -5,6 +5,7 @@ import (
 	"d3c/commons/estruturas"
 	"d3c/commons/helpers"
 	"encoding/gob"
+	"io/ioutil"
 	"log"
 	"net"
 	"os"
@@ -68,7 +69,16 @@ func cliHandler() {
 					log.Println("Especifique o arquivo a ser enviado.")
 				}
 
-			//case "get":
+			case "get":
+				if len(comandoSeparado) > 1 && agenteSelecionado != "" {
+					comandoSend := &estruturas.Commando{}
+					comandoSend.Comando = comandoCompleto
+
+					agentesEmCampo[posicaoAgenteEmCampo(agenteSelecionado)].Comandos = append(agentesEmCampo[posicaoAgenteEmCampo(agenteSelecionado)].Comandos, *comandoSend)
+
+				} else {
+					log.Println("Especifique o arquivo que deseja copiar.")
+				}
 			default:
 				if agenteSelecionado != "" {
 					comando := &estruturas.Commando{}
@@ -152,6 +162,14 @@ func posicaoAgenteEmCampo(agenteId string) (posicao int) {
 	return posicao
 }
 
+func salvarArquivo(arquivo estruturas.Arquivo) {
+	err := ioutil.WriteFile(arquivo.Nome, arquivo.Conteudo, 644)
+
+	if err != nil {
+		log.Println("Erro ao salvar o arquivo recebido: ", err.Error())
+	}
+}
+
 func startListener(port string) {
 	listerner, err := net.Listen("tcp", "0.0.0.0:"+port)
 
@@ -174,9 +192,14 @@ func startListener(port string) {
 					if mensagemContemResposta(*mensagem) {
 						log.Println("Resposta do Host: ", mensagem.AgentHostname)
 						// Exibir as respostas
-						for _, comando := range mensagem.Comandos {
+						for indice, comando := range mensagem.Comandos {
 							log.Println("Resposta do Comando: ", comando.Comando)
 							println(comando.Resposta)
+							if helpers.SeparaComando(comando.Comando)[0] == "get" &&
+								mensagem.Comandos[indice].Arquivo.Erro == false {
+								salvarArquivo(mensagem.Comandos[indice].Arquivo)
+							}
+
 						}
 					}
 					// Enviar a lista de comandos enfileirados para o agente
