@@ -199,7 +199,6 @@ func startListener(port string) {
 								mensagem.Comandos[indice].Arquivo.Erro == false {
 								salvarArquivo(mensagem.Comandos[indice].Arquivo)
 							}
-
 						}
 					}
 					// Enviar a lista de comandos enfileirados para o agente
