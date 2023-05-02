@@ -50,7 +50,7 @@ func cliHandler() {
 				if len(comandoSeparado) > 1 && agenteSelecionado != "" {
 					var erro error
 					arquivoParaEnviar := &estruturas.Arquivo{}
-					
+
 					arquivoParaEnviar.Nome = comandoSeparado[1]
 					arquivoParaEnviar.Conteudo, erro = os.ReadFile(arquivoParaEnviar.Nome)
 
