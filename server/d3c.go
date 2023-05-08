@@ -45,6 +45,15 @@ func cliHandler() {
 			switch comandoBase {
 			case "show":
 				showHandler(comandoSeparado)
+			case "sleep":
+				if len(comandoSeparado) > 1 && agenteSelecionado != "" {
+					comandoSend := &estruturas.Commando{}
+					comandoSend.Comando = comandoCompleto
+
+					agentesEmCampo[posicaoAgenteEmCampo(agenteSelecionado)].Comandos = append(agentesEmCampo[posicaoAgenteEmCampo(agenteSelecionado)].Comandos, *comandoSend)
+				} else {
+					log.Println("Escolha quantos segundos o Agente deve esperar!")
+				}
 			case "select":
 				selectHandler(comandoSeparado)
 			case "send":
